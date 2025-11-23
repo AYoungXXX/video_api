@@ -730,92 +730,164 @@ const parseDetail = async (req, res) => {
 
     const result = {
       url: url,
-      videoUrl: '',
+      videoUrls: [], // 改为数组，支持多个视频
       content: [],
       images: []
     };
 
-    // 1. 从 dplayer 中提取 video.url 链接
-    // 方法1: 查找 dplayer 容器，从 data-config 属性中提取（JSON格式）
-    const $dplayer = $('.dplayer, #dplayer, [class*="dplayer"], [id*="dplayer"]').first();
+    // 用于存储已提取的视频 URL，避免重复
+    const videoUrlSet = new Set();
+
+    /**
+     * 添加视频 URL 到结果数组（自动去重）
+     * @param {string} videoUrl - 视频 URL
+     */
+    const addVideoUrl = (videoUrl) => {
+      if (!videoUrl) return;
+      const resolvedUrl = resolveUrl(videoUrl, url);
+      // 只添加有效的 URL（以 http、https、// 或 / 开头）
+      if (resolvedUrl && (resolvedUrl.startsWith('http') || resolvedUrl.startsWith('//') || resolvedUrl.startsWith('/'))) {
+        // 确保是完整的绝对 URL
+        const fullUrl = resolvedUrl.startsWith('//') ? urlObj.protocol + resolvedUrl : resolvedUrl;
+        if (fullUrl && !videoUrlSet.has(fullUrl)) {
+          videoUrlSet.add(fullUrl);
+          result.videoUrls.push(fullUrl);
+        }
+      }
+    };
+
+    // 方法1: 从所有 dplayer 容器中提取 video.url 链接（支持多个）
+    // 查找所有 dplayer 元素，不仅仅是第一个
+    const $dplayers = $('.dplayer, #dplayer, [class*="dplayer"], [id*="dplayer"]');
     
-    if ($dplayer.length > 0) {
-      // 尝试从 data-config 属性中提取（这是最常见的格式）
+    $dplayers.each((i, el) => {
+      const $dplayer = $(el);
+      
+      // 优先从 data-config 属性中提取（这是最常见的格式）
       const dataConfig = $dplayer.attr('data-config');
       if (dataConfig) {
         try {
           const config = JSON.parse(dataConfig);
           if (config && config.video && config.video.url) {
-            result.videoUrl = resolveUrl(config.video.url, url);
+            addVideoUrl(config.video.url);
           }
         } catch (e) {
           console.warn('Failed to parse data-config:', e.message);
         }
       }
       
-      // 如果还没找到，尝试其他 data 属性
-      if (!result.videoUrl) {
-        const videoData = $dplayer.attr('data-video') || 
-                         $dplayer.attr('data-url') ||
-                         $dplayer.attr('data-src');
+      // 尝试其他 data 属性
+      const videoData = $dplayer.attr('data-video') || 
+                       $dplayer.attr('data-url') ||
+                       $dplayer.attr('data-src');
+      
+      if (videoData) {
+        try {
+          const videoObj = JSON.parse(videoData);
+          if (videoObj && videoObj.url) {
+            addVideoUrl(videoObj.url);
+          }
+        } catch (e) {
+          // 如果不是 JSON，直接使用
+          addVideoUrl(videoData);
+        }
+      }
+    });
+
+    // 方法2: 使用正则表达式从整个 HTML 中提取所有 data-config 中的视频链接（支持多个）
+    // 匹配 data-config 属性，支持单引号和双引号包裹，处理转义字符
+    // 使用非贪婪匹配，匹配到下一个引号或属性结束
+    const dataConfigPattern = /data-config\s*=\s*['"](.*?)['"]/gis;
+    let dataConfigMatch;
+    while ((dataConfigMatch = dataConfigPattern.exec(html)) !== null) {
+      try {
+        let configStr = dataConfigMatch[1];
+        // 处理 HTML 实体编码（如 &quot; 转换为 "，&#39; 转换为 '）
+        configStr = configStr
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&#x27;/g, "'")
+          .replace(/&amp;/g, '&')
+          .replace(/\\'/g, "'")
+          .replace(/\\"/g, '"');
         
-        if (videoData) {
-          try {
-            const videoObj = JSON.parse(videoData);
-            if (videoObj && videoObj.url) {
-              result.videoUrl = resolveUrl(videoObj.url, url);
-            }
-          } catch (e) {
-            // 如果不是 JSON，直接使用
-            result.videoUrl = resolveUrl(videoData, url);
+        // 尝试解析 JSON
+        const config = JSON.parse(configStr);
+        if (config && config.video && config.video.url) {
+          addVideoUrl(config.video.url);
+        }
+      } catch (e) {
+        // 如果 JSON 解析失败，尝试直接正则提取 video.url
+        // 匹配 "url": "..." 或 'url': '...' 格式
+        const urlPatterns = [
+          /["']url["']\s*:\s*["']([^"']+)["']/,
+          /["']url["']\s*:\s*["']([^"']*(?:\\.[^"']*)*)["']/,
+          /video["']?\s*:\s*\{[^}]*["']url["']\s*:\s*["']([^"']+)["']/
+        ];
+        
+        for (const pattern of urlPatterns) {
+          const urlMatch = dataConfigMatch[1].match(pattern);
+          if (urlMatch && urlMatch[1]) {
+            // 处理转义字符
+            const videoUrl = urlMatch[1].replace(/\\'/g, "'").replace(/\\"/g, '"');
+            addVideoUrl(videoUrl);
+            break;
           }
         }
       }
     }
 
-    // 方法2: 从 script 标签中提取 dplayer 初始化代码中的 video.url
-    if (!result.videoUrl) {
-      $('script').each((i, el) => {
-        const scriptContent = $(el).html() || '';
-        if (!scriptContent) return;
-        
-        // 匹配 new DPlayer({ video: { url: "..." } }) 格式
-        // 支持多行匹配，使用 [\s\S] 来匹配包括换行符在内的所有字符
-        const patterns = [
-          // 匹配 video: { url: "..." } 格式（单行或多行）
-          /video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/,
-          // 匹配 video.url = "..." 格式
-          /video\.url\s*=\s*['"]([^'"]+)['"]/,
-          // 匹配 "url": "..." 在 video 对象中
-          /video\s*:\s*\{[\s\S]*?["']url["']\s*:\s*['"]([^'"]+)['"]/,
-          // 匹配 DPlayer 初始化中的 url
-          /new\s+DPlayer\s*\([\s\S]*?video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/
-        ];
-        
-        for (const pattern of patterns) {
-          const match = scriptContent.match(pattern);
+    // 方法3: 使用正则表达式直接提取所有 .m3u8 链接
+    // 匹配常见的 m3u8 URL 格式（包括带查询参数的）
+    // 支持 http://、https://、// 开头的 URL
+    const m3u8Patterns = [
+      /(https?:\/\/[^\s"'<>\)]+\.m3u8[^\s"'<>\)]*)/gi,
+      /(\/\/[^\s"'<>\)]+\.m3u8[^\s"'<>\)]*)/gi
+    ];
+    
+    m3u8Patterns.forEach(pattern => {
+      let m3u8Match;
+      while ((m3u8Match = pattern.exec(html)) !== null) {
+        if (m3u8Match && m3u8Match[1]) {
+          addVideoUrl(m3u8Match[1]);
+        }
+      }
+    });
+
+    // 方法4: 从 script 标签中提取 dplayer 初始化代码中的 video.url（支持多个）
+    $('script').each((i, el) => {
+      const scriptContent = $(el).html() || '';
+      if (!scriptContent) return;
+      
+      // 匹配 new DPlayer({ video: { url: "..." } }) 格式
+      // 支持多行匹配，使用 [\s\S] 来匹配包括换行符在内的所有字符
+      const patterns = [
+        // 匹配 video: { url: "..." } 格式（单行或多行，全局匹配）
+        /video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/g,
+        // 匹配 video.url = "..." 格式（全局匹配）
+        /video\.url\s*=\s*['"]([^'"]+)['"]/g,
+        // 匹配 "url": "..." 在 video 对象中（全局匹配）
+        /video\s*:\s*\{[\s\S]*?["']url["']\s*:\s*['"]([^'"]+)['"]/g,
+        // 匹配 DPlayer 初始化中的 url（全局匹配）
+        /new\s+DPlayer\s*\([\s\S]*?video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/g
+      ];
+      
+      patterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.exec(scriptContent)) !== null) {
           if (match && match[1]) {
-            const videoUrl = match[1].trim();
-            // 验证是否是有效的 URL
-            if (videoUrl && (videoUrl.startsWith('http') || videoUrl.startsWith('//') || videoUrl.startsWith('/'))) {
-              result.videoUrl = resolveUrl(videoUrl, url);
-              return false; // break
-            }
+            addVideoUrl(match[1].trim());
           }
         }
       });
-    }
+    });
 
-    // 方法3: 从整个 HTML 文本中搜索（作为最后的手段）
-    if (!result.videoUrl) {
-      // 搜索包含 dplayer 和 url 的文本
-      const htmlText = html;
-      const dplayerMatch = htmlText.match(/dplayer[\s\S]{0,2000}?url\s*[:=]\s*['"]([^'"]+)['"]/i);
+    // 方法5: 从整个 HTML 文本中搜索所有包含 dplayer 和 url 的文本（作为补充）
+    const dplayerUrlPattern = /dplayer[\s\S]{0,2000}?url\s*[:=]\s*['"]([^'"]+)['"]/gi;
+    let dplayerMatch;
+    while ((dplayerMatch = dplayerUrlPattern.exec(html)) !== null) {
       if (dplayerMatch && dplayerMatch[1]) {
-        const videoUrl = dplayerMatch[1].trim();
-        if (videoUrl && (videoUrl.startsWith('http') || videoUrl.startsWith('//') || videoUrl.startsWith('/'))) {
-          result.videoUrl = resolveUrl(videoUrl, url);
-        }
+        addVideoUrl(dplayerMatch[1].trim());
       }
     }
 
