@@ -7,6 +7,7 @@
 - **框架**: Hono (替代了 Express，更轻量，原生支持 Serverless)
 - **解析库**: Cheerio
 - **HTTP 客户端**: Axios (带 Polyfill 支持)
+- **Serverless 适配**: serverless-http + @hono/node-server
 
 ## 前置要求
 
