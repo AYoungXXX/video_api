@@ -57,10 +57,15 @@ app.use((err, req, res, next) => {
 });
 
 // 启动服务器
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// 在 Vercel 等 serverless 环境中，不需要监听端口
+// 只有在非 serverless 环境（如本地开发）时才启动服务器
+if (process.env.VERCEL !== '1' && process.env.NOW !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
 
+// 导出应用供 Vercel serverless 函数使用
 module.exports = app;
 
