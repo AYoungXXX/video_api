@@ -118,9 +118,20 @@ netlify dev
 
 ## 故障排除
 
+### 问题：File is not defined 错误
+**错误信息**: `ReferenceError: File is not defined`
+
+**原因**: axios 1.6+ 使用 undici，undici 的 webidl 模块需要 File API，但 Netlify Functions 环境（Node.js 18）默认不提供。
+
+**解决方案**: 
+- ✅ 已自动处理：项目已包含 `netlify/functions/polyfills.js`，会在所有模块加载前定义 File API
+- 如果问题仍然存在，确保 `netlify.toml` 中 `NODE_VERSION = "20"`（Node.js 20 原生支持 File API）
+- 或者检查 bundler 配置，使用 `zisi` 而不是 `esbuild`
+
 ### 问题：函数超时
 - 检查代码中是否有长时间运行的操作
 - 考虑使用异步处理或队列
+- Netlify 免费版函数超时限制为 10 秒
 
 ### 问题：CORS 错误
 - 检查 `netlify.toml` 中的 CORS 头部配置
@@ -129,6 +140,7 @@ netlify dev
 ### 问题：依赖安装失败
 - 确保 `package.json` 中所有依赖版本正确
 - 检查 Node.js 版本兼容性
+- 确保已安装 `serverless-http` 依赖：`npm install`
 
 ## 相关链接
 

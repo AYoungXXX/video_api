@@ -9,8 +9,8 @@
 
 # Netlify Functions 配置
 [build.environment]
-  # Node.js 版本
-  NODE_VERSION = "18"
+  # Node.js 版本（使用 20 以获得更好的兼容性，包括 File API 支持）
+  NODE_VERSION = "20"
   # 环境变量（如果需要，可以在 Netlify 控制台设置）
   NODE_ENV = "production"
 
@@ -18,8 +18,9 @@
 [functions]
   # Functions 目录
   directory = "netlify/functions"
-  # Node.js 运行时版本
-  node_bundler = "esbuild"
+  # 使用 zisi bundler（更兼容，对 serverless 环境更友好）
+  # 或者使用 esbuild（更快但可能需要更多配置）
+  node_bundler = "zisi"
 
 # 重定向规则 - 将所有请求转发到 serverless function
 [[redirects]]

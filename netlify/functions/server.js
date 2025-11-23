@@ -4,12 +4,23 @@
  * 
  * 这个文件将 Express 应用转换为 Netlify 的 serverless function 格式
  * 所有 HTTP 请求都会被转发到这个函数处理
+ * 
+ * 重要：polyfills 必须在任何其他模块导入之前加载，
+ * 因为 axios/undici 在加载时会检查 File API 是否存在
  */
 
+// ============================================
+// 加载 Polyfills（必须在所有 require 之前）
+// ============================================
+require('./polyfills');
+
+// ============================================
+// 导入依赖（在 polyfill 之后）
+// ============================================
 const express = require('express');
 const serverless = require('serverless-http');
 
-// 导入 Express 应用
+// 导入 Express 应用（这会触发 axios 等依赖的加载）
 const app = require('../../app');
 
 /**
@@ -55,4 +66,3 @@ exports.handler = async (event, context) => {
     };
   }
 };
-
