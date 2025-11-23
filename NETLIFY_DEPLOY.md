@@ -2,6 +2,12 @@
 
 本文档说明如何将 Video API 项目部署到 Netlify。
 
+## 项目技术栈
+
+- **框架**: Hono (替代了 Express，更轻量，原生支持 Serverless)
+- **解析库**: Cheerio
+- **HTTP 客户端**: Axios (带 Polyfill 支持)
+
 ## 前置要求
 
 1. 拥有 Netlify 账号（免费版即可）
@@ -28,7 +34,6 @@
    - 在 "Site settings" → "Environment variables" 中添加：
      - `NODE_ENV`: `production`
      - `PORT`: `3000`（可选，Netlify 会自动分配）
-     - 其他需要的环境变量
 
 5. **部署**
    - 点击 "Deploy site"
@@ -50,7 +55,6 @@
    ```bash
    netlify init
    ```
-   按照提示选择或创建站点
 
 4. **部署**
    ```bash
@@ -64,87 +68,19 @@ video_api/
 ├── netlify.toml          # Netlify 配置文件
 ├── netlify/
 │   └── functions/
-│       └── server.js     # Netlify Function 入口
-├── app.js                 # Express 应用
-└── package.json           # 项目依赖
+│       └── server.js     # Netlify Function 入口 (Hono Adapter)
+├── polyfills.js          # Polyfills (File API)
+├── app.js                # Hono 应用入口
+├── controllers/          # 控制器
+│   └── parserController.js
+└── package.json          # 项目依赖
 ```
-
-## 配置说明
-
-### netlify.toml
-
-- **Functions 目录**: `netlify/functions`
-- **重定向规则**: 所有请求转发到 `/.netlify/functions/server`
-- **Node.js 版本**: 18
-- **CORS 支持**: 已配置允许跨域请求
-
-### server.js
-
-- 使用 `serverless-http` 将 Express 应用包装为 Netlify Function
-- 自动处理所有 HTTP 方法（GET、POST、PUT、DELETE 等）
-- 支持二进制文件类型（图片、视频等）
-
-## API 端点
-
-部署后，你的 API 端点将变为：
-
-- `https://your-site.netlify.app/api/*`
-- `https://your-site.netlify.app/health`
-- `https://your-site.netlify.app/`
-
-## 本地测试 Netlify Functions
-
-使用 Netlify CLI 在本地测试：
-
-```bash
-# 安装依赖
-npm install
-
-# 启动本地开发服务器
-netlify dev
-```
-
-这将启动一个本地服务器，模拟 Netlify 环境。
-
-## 注意事项
-
-1. **冷启动**: Netlify Functions 在首次请求时可能有冷启动延迟（通常 < 1 秒）
-2. **超时限制**: 
-   - 免费版：10 秒
-   - Pro 版：26 秒
-   - 企业版：可自定义
-3. **内存限制**: 默认 1024 MB
-4. **请求大小限制**: 6 MB（请求体）
 
 ## 故障排除
 
 ### 问题：File is not defined 错误
-**错误信息**: `ReferenceError: File is not defined`
-
-**原因**: axios 1.6+ 使用 undici，undici 的 webidl 模块需要 File API，但 Netlify Functions 环境（Node.js 18）默认不提供。
-
-**解决方案**: 
-- ✅ 已自动处理：项目已包含 `netlify/functions/polyfills.js`，会在所有模块加载前定义 File API
-- 如果问题仍然存在，确保 `netlify.toml` 中 `NODE_VERSION = "20"`（Node.js 20 原生支持 File API）
-- 或者检查 bundler 配置，使用 `zisi` 而不是 `esbuild`
-
-### 问题：函数超时
-- 检查代码中是否有长时间运行的操作
-- 考虑使用异步处理或队列
-- Netlify 免费版函数超时限制为 10 秒
-
-### 问题：CORS 错误
-- 检查 `netlify.toml` 中的 CORS 头部配置
-- 确保前端请求的域名已添加到允许列表
+**已解决**: 项目包含 `polyfills.js`，自动在所有环境加载 File API polyfill。
 
 ### 问题：依赖安装失败
-- 确保 `package.json` 中所有依赖版本正确
-- 检查 Node.js 版本兼容性
-- 确保已安装 `serverless-http` 依赖：`npm install`
-
-## 相关链接
-
-- [Netlify Functions 文档](https://docs.netlify.com/functions/overview/)
-- [serverless-http 文档](https://github.com/dougmoscrop/serverless-http)
-- [Netlify 部署文档](https://docs.netlify.com/site-deploys/overview/)
-
+确保 Node.js 版本至少为 18。推荐使用 Node.js 20。
+在 `netlify.toml` 中已配置 `NODE_VERSION = "20"`。

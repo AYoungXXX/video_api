@@ -3,16 +3,17 @@ const cheerio = require('cheerio');
 
 /**
  * 解析网页内容，提取post-card信息和分页器数据
+ * @param {import('hono').Context} c
  */
-const parsePage = async (req, res) => {
+const parsePage = async (c) => {
   try {
-    const { url } = req.query;
+    const url = c.req.query('url');
 
     if (!url) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'URL parameter is required'
-      });
+      }, 400);
     }
 
     // 验证URL格式
@@ -20,10 +21,10 @@ const parsePage = async (req, res) => {
     try {
       urlObj = new URL(url);
     } catch (error) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'Invalid URL format'
-      });
+      }, 400);
     }
 
     // 获取HTML内容
@@ -53,9 +54,6 @@ const parsePage = async (req, res) => {
       
       try {
         // 使用URL构造函数自动处理相对路径和绝对路径
-        // 如果relativeUrl以/开头，会被视为相对于baseUrl的根路径
-        // 例如: /archives/97163/ + https://wiki.ndyechuz.cc/ 
-        // 结果: https://wiki.ndyechuz.cc/archives/97163/
         return new URL(relativeUrl, baseUrl).href;
       } catch (e) {
         // 如果URL构造函数失败，尝试手动拼接
@@ -115,22 +113,21 @@ const parsePage = async (req, res) => {
     uniqueCards.forEach((cardElement, index) => {
       const $card = $(cardElement);
       
-      // 提取标题 - 优先使用已知的选择器
+      // 提取标题
       let title = $card.find('h2.post-card-title, h2[itemprop="headline"], h3[itemprop="headline"]').first().text().trim() ||
                   $card.find('[itemprop="headline"]').first().text().trim() ||
                   $card.find('h2, h3, .title, [class*="title"]').first().text().trim() || '';
       
-      // 提取跳转链接 - 优先查找包含/archives/的链接
+      // 提取跳转链接
       let link = '';
       
-      // 方法1: 查找包含整个post-card的a标签（最常见的情况）
-      // 这个a标签通常包含整个post-card结构
+      // 方法1: 查找包含整个post-card的a标签
       const $outerLink = $card.find('> a[href*="/archives/"]').first();
       if ($outerLink.length > 0) {
         link = $outerLink.attr('href') || '';
       }
       
-      // 方法2: 查找包含/archives/的链接（任何位置）
+      // 方法2: 查找包含/archives/的链接
       if (!link) {
         const $archivesLink = $card.find('a[href*="/archives/"]').first();
         if ($archivesLink.length > 0) {
@@ -138,7 +135,7 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法3: 从meta标签中提取（itemprop="url mainEntityOfPage"）
+      // 方法3: 从meta标签中提取
       if (!link) {
         const metaUrl = $card.find('meta[itemprop="url"], meta[itemprop*="url"]').attr('content');
         if (metaUrl) {
@@ -165,23 +162,19 @@ const parsePage = async (req, res) => {
       // 将相对路径转换为绝对路径
       let fullLink = '';
       if (link) {
-        // 确保提取的是href属性值，不是文本内容
         link = link.trim();
-        // 使用resolveUrl函数合并URL
         fullLink = resolveUrl(link, url);
       }
       
-      // 提取图片链接 - 优先从loadBannerDirect函数调用中提取
+      // 提取图片链接
       let imageUrl = '';
       
-      // 方法1: 从loadBannerDirect函数调用中提取
       const cardHtml = $card.html() || '';
       const loadBannerMatch = cardHtml.match(/loadBannerDirect\s*\(\s*['"]([^'"]+)['"]/);
       if (loadBannerMatch && loadBannerMatch[1]) {
         imageUrl = loadBannerMatch[1];
       }
       
-      // 方法2: 从img标签中提取
       if (!imageUrl) {
         const $img = $card.find('img').first();
         if ($img.length > 0) {
@@ -194,7 +187,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法3: 从onclick或其他事件属性中提取
       if (!imageUrl) {
         $card.find('[onclick*="loadBannerDirect"], [onclick*="loadBanner"]').each((i, el) => {
           const onclick = $(el).attr('onclick') || '';
@@ -210,15 +202,13 @@ const parsePage = async (req, res) => {
         imageUrl = resolveUrl(imageUrl, url);
       }
         
-      // 提取发布时间 - 查找包含日期的文本
+      // 提取发布时间
       let publishTime = '';
-      // 查找日期相关的元素
       const dateText = $card.find('.date, .time, time, [class*="date"], [class*="time"]').first().text().trim() || 
                       $card.find('time').attr('datetime') || '';
       if (dateText) {
         publishTime = dateText;
       } else {
-        // 尝试从卡片文本中提取日期模式
         const cardText = $card.text();
         const dateMatch = cardText.match(/(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)/);
         if (dateMatch) {
@@ -226,10 +216,9 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 提取作者 - 优先从meta标签的content属性中提取
+      // 提取作者
       let author = '';
       
-      // 方法1: 从itemprop="author"容器内的meta[itemprop="name"]标签中提取content
       const $authorContainer = $card.find('[itemprop="author"]').first();
       if ($authorContainer.length > 0) {
         const authorMeta = $authorContainer.find('meta[itemprop="name"]').first();
@@ -241,7 +230,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法2: 如果方法1失败，尝试直接从meta标签中查找（可能在article级别）
       if (!author) {
         const $authorMeta = $card.find('meta[itemprop="author"] meta[itemprop="name"], [itemprop="author"] meta[itemprop="name"]').first();
         if ($authorMeta.length > 0) {
@@ -252,7 +240,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法3: 从span或其他元素中提取作者文本
       if (!author) {
         const $authorEl = $card.find('span[itemprop="author"], [itemprop="author"] span').first();
         if ($authorEl.length > 0) {
@@ -260,7 +247,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法4: 从其他作者相关的元素中提取
       if (!author) {
         const authorText = $card.find('.author, [class*="author"], .by, [class*="by"]').first().text().trim() || '';
         if (authorText) {
@@ -268,14 +254,11 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法5: 尝试从文本中提取作者（通常在"作者名 •"这样的格式中）
       if (!author) {
         const cardText = $card.text();
-        // 匹配"作者名 •"或"作者名 ·"格式
         const authorMatch = cardText.match(/([^\s•·\n]{2,15}?)\s*[•·]/);
         if (authorMatch && authorMatch[1].trim().length >= 2 && authorMatch[1].trim().length < 20) {
           const potentialAuthor = authorMatch[1].trim();
-          // 验证是否是常见的作者名格式（中文名，不包含日期等）
           if (!potentialAuthor.match(/^\d/) && 
               !potentialAuthor.match(/年|月|日/) &&
               potentialAuthor.match(/[\u4e00-\u9fa5]/)) {
@@ -284,16 +267,14 @@ const parsePage = async (req, res) => {
         }
       }
         
-      // 提取分类 - 优先查找包含逗号的span（如"今日吃瓜, 深夜撸片"）
+      // 提取分类
       const categories = [];
       
-      // 方法1: 查找包含逗号的span（这是最常见的分类格式）
       $card.find('span').each((i, el) => {
         const $el = $(el);
         const categoryText = $el.text().trim();
         const categoryClass = $el.attr('class') || '';
         
-        // 如果包含逗号，很可能是分类
         if (categoryText && categoryText.includes(',')) {
           const categoryList = categoryText.split(',').map(c => c.trim()).filter(c => 
             c.length > 0 && 
@@ -318,7 +299,6 @@ const parsePage = async (req, res) => {
                    !categoryClass.includes('author') &&
                    categoryText !== author &&
                    !categoryText.match(/^(小瓜妹|91瓜叔|瓜爷|传瓜哥|瓜姐姐)$/i)) {
-          // 单个分类（不包含逗号）
           const cleanText = categoryText.replace(/[•·]/g, '').trim();
           if (cleanText && !categories.includes(cleanText)) {
             categories.push(cleanText);
@@ -326,7 +306,6 @@ const parsePage = async (req, res) => {
         }
       });
       
-      // 方法2: 从链接URL中提取分类
       if (link) {
         const categoryMatch = link.match(/\/category\/([^\/]+)/);
         if (categoryMatch && categoryMatch[1]) {
@@ -337,7 +316,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 方法3: 从其他元素中提取分类
       $card.find('.category, [class*="category"], .tag, [class*="tag"], a[href*="/category/"]').each((i, el) => {
         const $el = $(el);
         let categoryText = $el.text().trim();
@@ -363,7 +341,6 @@ const parsePage = async (req, res) => {
         }
       });
       
-      // 如果找到了标题或链接，添加到结果中
       if (title || fullLink) {
         posts.push({
           index: index + 1,
@@ -377,12 +354,10 @@ const parsePage = async (req, res) => {
       }
     });
     
-    // 策略2: 如果策略1没有找到足够的内容，尝试查找.post-card等标准结构
     if (posts.length === 0) {
       $('.post-card, article, .post, .item, [class*="card"], [class*="post-item"]').each((index, element) => {
         const $card = $(element);
         
-        // 提取图片
         let imageUrl = $card.find('img').first().attr('src') || 
                        $card.find('img').first().attr('data-src') || 
                        $card.find('img').first().attr('data-lazy-src') || '';
@@ -390,23 +365,18 @@ const parsePage = async (req, res) => {
           imageUrl = resolveUrl(imageUrl, url);
         }
         
-        // 提取链接
         let link = $card.find('a[href*="/archives/"]').first().attr('href') ||
                    $card.find('h2 a, h3 a').first().attr('href') ||
                    $card.find('a').first().attr('href') || '';
         const fullLink = link ? resolveUrl(link, url) : '';
         
-        // 提取标题
         const title = $card.find('h2, h3, .title, a').first().text().trim() || '';
         
-        // 提取发布时间
         const publishTime = $card.find('.date, .time, time').first().text().trim() || 
                            $card.find('time').attr('datetime') || '';
         
-        // 提取作者
         const author = $card.find('.author, [class*="author"]').first().text().trim() || '';
         
-        // 提取分类
         const categories = [];
         $card.find('span').each((i, span) => {
           const categoryText = $(span).text().trim();
@@ -437,19 +407,16 @@ const parsePage = async (req, res) => {
       });
     }
 
-
     // 提取分页器数据
     const pagination = {};
     const $pageNav = $('.page-nav');
     
     if ($pageNav.length > 0) {
-      // 提取当前页和总页数 - 优先从.page-info中提取（格式：当前页/总页数）
       let currentPage = '';
       let totalPages = '';
       
       const pageInfoText = $pageNav.find('.page-info').first().text().trim();
       if (pageInfoText) {
-        // 匹配格式：2/749 或 2 / 749
         const pageInfoMatch = pageInfoText.match(/(\d+)\s*\/\s*(\d+)/);
         if (pageInfoMatch) {
           currentPage = pageInfoMatch[1];
@@ -457,7 +424,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 如果从page-info中没提取到，尝试其他方法
       if (!currentPage) {
         currentPage = $pageNav.find('.current, .active, [class*="current"]').text().trim() || 
                      $pageNav.find('a.active, li.active a').text().trim() || 
@@ -469,7 +435,6 @@ const parsePage = async (req, res) => {
                     $pageNav.text().match(/\/(\d+)/)?.[1] || '';
       }
       
-      // 提取所有分页链接（排除上一页和下一页）
       const pageLinks = [];
       $pageNav.find('.page-navigator a, ul a, .pagination a').each((i, el) => {
         const $link = $(el);
@@ -477,7 +442,6 @@ const parsePage = async (req, res) => {
         const text = $link.text().trim();
         const $parent = $link.parent();
         
-        // 排除上一页和下一页链接
         if (href && 
             text && 
             !$parent.hasClass('prev') && 
@@ -492,7 +456,6 @@ const parsePage = async (req, res) => {
         }
       });
 
-      // 提取上一页 - 从.prev li中的a标签提取
       let prevPage = null;
       const $prevLink = $pageNav.find('li.prev a, .prev a, [class*="prev"] a').first();
       if ($prevLink.length > 0) {
@@ -502,7 +465,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 如果没找到，尝试通过alt属性查找（图片链接）
       if (!prevPage) {
         $pageNav.find('a img[alt*="上一页"], a img[alt*="prev"], a img[alt*="Previous"]').each((i, el) => {
           const $link = $(el).parent('a');
@@ -516,7 +478,6 @@ const parsePage = async (req, res) => {
         });
       }
       
-      // 提取下一页 - 从.next li中的a标签提取
       let nextPage = null;
       const $nextLink = $pageNav.find('li.next a, .next a, [class*="next"] a').first();
       if ($nextLink.length > 0) {
@@ -526,7 +487,6 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 如果没找到，尝试通过alt属性查找（图片链接）
       if (!nextPage) {
         $pageNav.find('a img[alt*="下一页"], a img[alt*="next"], a img[alt*="Next"]').each((i, el) => {
           const $link = $(el).parent('a');
@@ -546,7 +506,6 @@ const parsePage = async (req, res) => {
       pagination.prevPage = prevPage || null;
       pagination.nextPage = nextPage || null;
     } else {
-      // 如果没有找到.page-nav，尝试其他分页器选择器
       const $pagination = $('.pagination, .pager, [class*="page"]');
       if ($pagination.length > 0) {
         const currentPage = $pagination.find('.current, .active').text().trim() || '1';
@@ -559,7 +518,6 @@ const parsePage = async (req, res) => {
           const text = $link.text().trim();
           const $parent = $link.parent();
           
-          // 排除上一页和下一页链接
           if (href && 
               text && 
               !$parent.hasClass('prev') && 
@@ -573,7 +531,6 @@ const parsePage = async (req, res) => {
           }
         });
 
-        // 提取上一页和下一页
         let prevPage = null;
         const $prevLink = $pagination.find('li.prev a, .prev a, [class*="prev"] a').first();
         if ($prevLink.length > 0) {
@@ -602,22 +559,18 @@ const parsePage = async (req, res) => {
 
     // 过滤广告内容
     const filteredPosts = posts.filter(post => {
-      // 过滤条件1: 链接必须包含/archives/（真正的文章链接）
       if (post.link && !post.link.includes('/archives/')) {
         return false;
       }
       
-      // 过滤条件2: 必须有标题且标题长度合理（至少5个字符）
       if (!post.title || post.title.length < 5 || post.title === '无标题') {
         return false;
       }
       
-      // 过滤条件3: 链接不能指向外部域名（广告通常指向外部）
       if (post.link) {
         try {
           const postUrl = new URL(post.link);
           const baseUrl = new URL(url);
-          // 如果链接的域名与基础URL的域名不同，可能是广告
           if (postUrl.hostname !== baseUrl.hostname && 
               postUrl.hostname !== urlObj.hostname) {
             return false;
@@ -627,14 +580,12 @@ const parsePage = async (req, res) => {
         }
       }
       
-      // 过滤条件4: 标题不能是明显的广告关键词
       const adKeywords = ['广告', '推广', '赞助', 'advertisement', 'ad', 'sponsor', 'promo'];
       const titleLower = post.title.toLowerCase();
       if (adKeywords.some(keyword => titleLower.includes(keyword.toLowerCase()))) {
         return false;
       }
       
-      // 过滤条件5: 必须有链接（没有链接的可能是无效内容）
       if (!post.link || post.link.length === 0) {
         return false;
       }
@@ -642,12 +593,11 @@ const parsePage = async (req, res) => {
       return true;
     });
     
-    // 重新设置索引
     filteredPosts.forEach((post, index) => {
       post.index = index + 1;
     });
 
-    res.json({
+    return c.json({
       success: true,
       data: {
         url: url,
@@ -659,26 +609,27 @@ const parsePage = async (req, res) => {
 
   } catch (error) {
     console.error('Parse error:', error);
-    res.status(500).json({
+    return c.json({
       success: false,
       error: error.message || 'Failed to parse page',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    }, 500);
   }
 };
 
 /**
  * 解析详情页内容，提取视频链接、文案和图片
+ * @param {import('hono').Context} c
  */
-const parseDetail = async (req, res) => {
+const parseDetail = async (c) => {
   try {
-    const { url } = req.query;
+    const url = c.req.query('url');
 
     if (!url) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'URL parameter is required'
-      });
+      }, 400);
     }
 
     // 验证URL格式
@@ -686,10 +637,10 @@ const parseDetail = async (req, res) => {
     try {
       urlObj = new URL(url);
     } catch (error) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'Invalid URL format'
-      });
+      }, 400);
     }
 
     // 获取HTML内容
@@ -757,13 +708,11 @@ const parseDetail = async (req, res) => {
     };
 
     // 方法1: 从所有 dplayer 容器中提取 video.url 链接（支持多个）
-    // 查找所有 dplayer 元素，不仅仅是第一个
     const $dplayers = $('.dplayer, #dplayer, [class*="dplayer"], [id*="dplayer"]');
     
     $dplayers.each((i, el) => {
       const $dplayer = $(el);
       
-      // 优先从 data-config 属性中提取（这是最常见的格式）
       const dataConfig = $dplayer.attr('data-config');
       if (dataConfig) {
         try {
@@ -776,7 +725,6 @@ const parseDetail = async (req, res) => {
         }
       }
       
-      // 尝试其他 data 属性
       const videoData = $dplayer.attr('data-video') || 
                        $dplayer.attr('data-url') ||
                        $dplayer.attr('data-src');
@@ -788,21 +736,17 @@ const parseDetail = async (req, res) => {
             addVideoUrl(videoObj.url);
           }
         } catch (e) {
-          // 如果不是 JSON，直接使用
           addVideoUrl(videoData);
         }
       }
     });
 
     // 方法2: 使用正则表达式从整个 HTML 中提取所有 data-config 中的视频链接（支持多个）
-    // 匹配 data-config 属性，支持单引号和双引号包裹，处理转义字符
-    // 使用非贪婪匹配，匹配到下一个引号或属性结束
     const dataConfigPattern = /data-config\s*=\s*['"](.*?)['"]/gis;
     let dataConfigMatch;
     while ((dataConfigMatch = dataConfigPattern.exec(html)) !== null) {
       try {
         let configStr = dataConfigMatch[1];
-        // 处理 HTML 实体编码（如 &quot; 转换为 "，&#39; 转换为 '）
         configStr = configStr
           .replace(/&quot;/g, '"')
           .replace(/&#39;/g, "'")
@@ -811,14 +755,11 @@ const parseDetail = async (req, res) => {
           .replace(/\\'/g, "'")
           .replace(/\\"/g, '"');
         
-        // 尝试解析 JSON
         const config = JSON.parse(configStr);
         if (config && config.video && config.video.url) {
           addVideoUrl(config.video.url);
         }
       } catch (e) {
-        // 如果 JSON 解析失败，尝试直接正则提取 video.url
-        // 匹配 "url": "..." 或 'url': '...' 格式
         const urlPatterns = [
           /["']url["']\s*:\s*["']([^"']+)["']/,
           /["']url["']\s*:\s*["']([^"']*(?:\\.[^"']*)*)["']/,
@@ -828,7 +769,6 @@ const parseDetail = async (req, res) => {
         for (const pattern of urlPatterns) {
           const urlMatch = dataConfigMatch[1].match(pattern);
           if (urlMatch && urlMatch[1]) {
-            // 处理转义字符
             const videoUrl = urlMatch[1].replace(/\\'/g, "'").replace(/\\"/g, '"');
             addVideoUrl(videoUrl);
             break;
@@ -838,8 +778,6 @@ const parseDetail = async (req, res) => {
     }
 
     // 方法3: 使用正则表达式直接提取所有 .m3u8 链接
-    // 匹配常见的 m3u8 URL 格式（包括带查询参数的）
-    // 支持 http://、https://、// 开头的 URL
     const m3u8Patterns = [
       /(https?:\/\/[^\s"'<>\)]+\.m3u8[^\s"'<>\)]*)/gi,
       /(\/\/[^\s"'<>\)]+\.m3u8[^\s"'<>\)]*)/gi
@@ -859,16 +797,10 @@ const parseDetail = async (req, res) => {
       const scriptContent = $(el).html() || '';
       if (!scriptContent) return;
       
-      // 匹配 new DPlayer({ video: { url: "..." } }) 格式
-      // 支持多行匹配，使用 [\s\S] 来匹配包括换行符在内的所有字符
       const patterns = [
-        // 匹配 video: { url: "..." } 格式（单行或多行，全局匹配）
         /video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/g,
-        // 匹配 video.url = "..." 格式（全局匹配）
         /video\.url\s*=\s*['"]([^'"]+)['"]/g,
-        // 匹配 "url": "..." 在 video 对象中（全局匹配）
         /video\s*:\s*\{[\s\S]*?["']url["']\s*:\s*['"]([^'"]+)['"]/g,
-        // 匹配 DPlayer 初始化中的 url（全局匹配）
         /new\s+DPlayer\s*\([\s\S]*?video\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"]/g
       ];
       
@@ -895,26 +827,18 @@ const parseDetail = async (req, res) => {
     const $postContent = $('.post-content, [class*="post-content"], article, [class*="content"]').first();
     
     if ($postContent.length > 0) {
-      // 查找 blockquote 元素
       const $blockquote = $postContent.find('blockquote').first();
-      
-      // 查找 dplayer 元素（用于确定停止解析的位置）
       const $dplayer = $postContent.find('.dplayer, #dplayer, [class*="dplayer"], [id*="dplayer"]').first();
       
       if ($blockquote.length > 0) {
-        // 确定要提取的元素范围：blockquote 之后，dplayer 之前
         let $elementsToParse;
         
         if ($dplayer.length > 0) {
-          // 如果 dplayer 存在，只提取 blockquote 和 dplayer 之间的兄弟节点
-          // 使用 nextUntil 获取两个元素之间的所有兄弟节点
           $elementsToParse = $blockquote.nextUntil($dplayer);
         } else {
-          // 如果 dplayer 不存在，提取 blockquote 后面的所有兄弟节点
           $elementsToParse = $blockquote.nextAll();
         }
         
-        // 提取 p 标签的文案
         $elementsToParse.find('p').add($elementsToParse.filter('p')).each((i, el) => {
           const $p = $(el);
           const text = $p.text().trim();
@@ -927,7 +851,6 @@ const parseDetail = async (req, res) => {
           }
         });
         
-        // 提取 img 标签的图片（data-xkrkllgl 属性在 img 标签上）
         $elementsToParse.find('img[data-xkrkllgl]').each((i, el) => {
           const $img = $(el);
           const imageUrl = $img.attr('data-xkrkllgl');
@@ -942,25 +865,20 @@ const parseDetail = async (req, res) => {
           }
         });
       } else {
-        // 如果没有 blockquote，从开头提取，但遇到 dplayer 就停止
         let $elementsToParse;
         
         if ($dplayer.length > 0) {
-          // 如果 dplayer 存在，只提取 dplayer 之前的所有子元素
           $elementsToParse = $postContent.children().not($dplayer).filter((i, el) => {
             const $el = $(el);
-            // 检查元素是否在 dplayer 之前
             const allChildren = $postContent.children();
             const elIndex = allChildren.index($el);
             const dplayerIndex = allChildren.index($dplayer);
             return elIndex < dplayerIndex;
           });
         } else {
-          // 如果 dplayer 不存在，提取所有内容
           $elementsToParse = $postContent.children();
         }
         
-        // 提取 p 标签的文案
         $elementsToParse.find('p').add($elementsToParse.filter('p')).each((i, el) => {
           const $p = $(el);
           const text = $p.text().trim();
@@ -973,7 +891,6 @@ const parseDetail = async (req, res) => {
           }
         });
         
-        // 提取 img 标签的图片
         $elementsToParse.find('img[data-xkrkllgl]').each((i, el) => {
           const $img = $(el);
           const imageUrl = $img.attr('data-xkrkllgl');
@@ -993,33 +910,34 @@ const parseDetail = async (req, res) => {
     // 去重图片数组
     result.images = [...new Set(result.images)];
 
-    res.json({
+    return c.json({
       success: true,
       data: result
     });
 
   } catch (error) {
     console.error('Parse detail error:', error);
-    res.status(500).json({
+    return c.json({
       success: false,
       error: error.message || 'Failed to parse detail page',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    }, 500);
   }
 };
 
 /**
  * 解析分类链接，提取分类列表
+ * @param {import('hono').Context} c
  */
-const parseCategories = async (req, res) => {
+const parseCategories = async (c) => {
   try {
-    const { url } = req.query;
+    const url = c.req.query('url');
 
     if (!url) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'URL parameter is required'
-      });
+      }, 400);
     }
 
     // 验证URL格式
@@ -1027,10 +945,10 @@ const parseCategories = async (req, res) => {
     try {
       urlObj = new URL(url);
     } catch (error) {
-      return res.status(400).json({
+      return c.json({
         success: false,
         error: 'Invalid URL format'
-      });
+      }, 400);
     }
 
     // 获取HTML内容
@@ -1122,7 +1040,7 @@ const parseCategories = async (req, res) => {
       });
     }
 
-    res.json({
+    return c.json({
       success: true,
       data: {
         url: url,
@@ -1133,11 +1051,11 @@ const parseCategories = async (req, res) => {
 
   } catch (error) {
     console.error('Parse categories error:', error);
-    res.status(500).json({
+    return c.json({
       success: false,
       error: error.message || 'Failed to parse categories',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    }, 500);
   }
 };
 
@@ -1146,4 +1064,3 @@ module.exports = {
   parseDetail,
   parseCategories
 };
-
