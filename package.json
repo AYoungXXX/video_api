@@ -22,7 +22,8 @@
     "morgan": "^1.10.0",
     "helmet": "^7.1.0",
     "cheerio": "^1.0.0-rc.12",
-    "axios": "^1.6.2"
+    "axios": "^1.6.2",
+    "serverless-http": "^3.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

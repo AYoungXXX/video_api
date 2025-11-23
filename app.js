@@ -57,9 +57,9 @@ app.use((err, req, res, next) => {
 });
 
 // 启动服务器
-// 在 Vercel 等 serverless 环境中，不需要监听端口
+// 在 Vercel、Netlify 等 serverless 环境中，不需要监听端口
 // 只有在非 serverless 环境（如本地开发）时才启动服务器
-if (process.env.VERCEL !== '1' && process.env.NOW !== '1') {
+if (process.env.VERCEL !== '1' && process.env.NOW !== '1' && !process.env.NETLIFY) {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

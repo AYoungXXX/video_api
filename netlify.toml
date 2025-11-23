@@ -1,0 +1,46 @@
+# Netlify 部署配置文件
+# 用于配置 Netlify 的构建和部署设置
+
+[build]
+  # 构建命令（如果需要构建步骤，否则可以为空）
+  command = ""
+  # 发布目录（对于 Node.js API，通常不需要）
+  publish = ""
+
+# Netlify Functions 配置
+[build.environment]
+  # Node.js 版本
+  NODE_VERSION = "18"
+  # 环境变量（如果需要，可以在 Netlify 控制台设置）
+  NODE_ENV = "production"
+
+# Functions 配置
+[functions]
+  # Functions 目录
+  directory = "netlify/functions"
+  # Node.js 运行时版本
+  node_bundler = "esbuild"
+
+# 重定向规则 - 将所有请求转发到 serverless function
+[[redirects]]
+  # 匹配所有路径
+  from = "/*"
+  # 转发到 serverless function
+  to = "/.netlify/functions/server"
+  # 保持原始请求方法和查询参数
+  status = 200
+  force = true
+
+# 头部设置（可选）
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # 允许跨域请求
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    # 安全头
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+
